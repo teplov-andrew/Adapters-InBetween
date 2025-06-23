@@ -1,9 +1,6 @@
-#!/usr/bin/env python3
 """
-infer_fullflow.py — SAIN-хуки (points=1 + двунаправленный RAFT-flow)
-
 Запуск:
- python infer_fullflow.py \
+ python infer.py \
    --frameA frame1.png --frameB frame2.png \
    --out result.png --size 512 --device cuda
 """
@@ -36,19 +33,15 @@ def main():
     args = p.parse_args()
     dev = torch.device(args.device)
 
-    # 1) load & resize
     A_img = Image.open(args.frameA).convert("RGB").resize((args.size,)*2)
     B_img = Image.open(args.frameB).convert("RGB").resize((args.size,)*2)
     H = W = args.size
 
-    # 2) tensors −1…1
     A = pil2ten(A_img).to(dev)
     B = pil2ten(B_img).to(dev)
 
-    # 3) POINTS = ВСЁ ЕДИНИЦЫ
     points = torch.ones((1,1,H,W), device=dev)
 
-    # 4) двунаправленный RAFT-flow
     raft = raft_large(weights=Raft_Large_Weights.DEFAULT, progress=False).to(dev).eval()
     inpA = to_tensor(A_img).unsqueeze(0).to(dev)
     inpB = to_tensor(B_img).unsqueeze(0).to(dev)
@@ -56,7 +49,6 @@ def main():
     flowBA = raft(inpB, inpA)[-1]
     region_flow = [flowAB, flowBA]
 
-    # 5) init SAIN с теми же гиперпараметрами
     sargs = type("",(),{})()
     sargs.device       = dev
     sargs.phase        = "test"
@@ -67,10 +59,8 @@ def main():
     sargs.resume_flownet = ""
     net = SAIN(sargs).to(dev).eval()
 
-    # 6) load weights (игнорируем только attn_mask)
     ckpt = torch.load(args.ckpt, map_location=dev)
     state = ckpt.get("state_dict", ckpt)
-    # strip prefixes
     newst = {}
     for k,v in state.items():
         k2 = k
@@ -80,7 +70,6 @@ def main():
         newst[k2] = v
     net.load_state_dict(newst, strict=False)
 
-    # 7) forward & save
     pred = net(A, B, points, region_flow)[0]
     ten2pil(pred).save(args.out)
     print("✓ saved →", args.out)
